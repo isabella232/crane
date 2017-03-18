@@ -263,24 +263,28 @@ function processStub() {
     return new Promise((resolve, reject) => {
         var offset: number = 0;
         if (stubsToDo.length == 0) {
-            reject();
+            return reject();
         }
-        stubsToDo.forEach(file => {
-            fq.readFile(file, { encoding: 'utf8' }, (err, data) => {
-                treeBuilder.Parse(data, file).then(result => {
-                    addToWorkspaceTree(result.tree);
-                    Debug.info(`${offset} Stub Processed: ${file}`);
-                    offset++;
-                    if (offset == stubsToDo.length) {
-                        resolve();
-                    }
-                }).catch(err => {
-                    Debug.error(`${offset} Stub Error: ${file}`);
-                    Debug.error((util.inspect(err, false, null)));
-                    offset++;
-                    if (offset == stubsToDo.length) {
-                        resolve();
-                    }
+        treeBuilder.parser.withoutDiagnostics((done) => {
+            stubsToDo.forEach(file => {
+                fq.readFile(file, { encoding: 'utf8' }, (err, data) => {
+                    treeBuilder.Parse(data, file).then(result => {
+                        addToWorkspaceTree(result.tree);
+                        Debug.info(`${offset} Stub Processed: ${file}`);
+                        offset++;
+                        if (offset == stubsToDo.length) {
+                            done();
+                            resolve();
+                        }
+                    }).catch(err => {
+                        Debug.error(`${offset} Stub Error: ${file}`);
+                        Debug.error((util.inspect(err, false, null)));
+                        offset++;
+                        if (offset == stubsToDo.length) {
+                            done();
+                            resolve();
+                        }
+                    });
                 });
             });
         });

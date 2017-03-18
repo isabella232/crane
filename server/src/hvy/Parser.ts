@@ -35,6 +35,35 @@ export class Parser {
             this.parser = new phpParser(options);
         }
     }
+
+
+    /**
+     * Scan and ignore diagnostic tools
+     * @param fn 
+     */
+    public withoutDiagnostics(fn) {
+        var diagParser = null;
+        if (this.diagnostics) {
+            var diagParser = this.parser;
+            this.parser = new phpParser(options);
+        }
+        var wait = new Promise(function(done, reject) {
+            var result = fn(done, reject);
+            if (result instanceof Promise) {
+                result.then(done, reject);
+            }
+        });
+        return wait.then(() => {
+            if (diagParser) {
+                this.parser = diagParser;
+            }
+        }).catch(() => {
+            if (diagParser) {
+                this.parser = diagParser;
+            }
+        });
+    }
+
     /**
      * Indicate to diagnostic tool that you are currently scan multiple
      * files, so the cross files passes will be trigger at the end of the scan
