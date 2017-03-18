@@ -291,27 +291,32 @@ function processStub() {
  * Processes the users workspace files
  */
 function processWorkspaceFiles(projectPath: string, treePath: string) {
-    docsToDo.forEach(file => {
-        fq.readFile(file, { encoding: 'utf8' }, (err, data) => {
-            treeBuilder.Parse(data, file).then(result => {
-                addToWorkspaceTree(result.tree);
-                docsDoneCount++;
-                connection.sendNotification("fileProcessed", {
-                    filename: file,
-                    total: docsDoneCount,
-                    error: null
+    treeBuilder.parser.scan((done) => {
+        var wait = [];
+        docsToDo.forEach(file => {
+            fq.readFile(file, { encoding: 'utf8' }, (err, data) => {
+                treeBuilder.Parse(data, file).then(result => {
+                    addToWorkspaceTree(result.tree);
+                    docsDoneCount++;
+                    connection.sendNotification("fileProcessed", {
+                        filename: file,
+                        total: docsDoneCount,
+                        error: null
+                    });
+                    if (docsToDo.length == docsDoneCount) {
+                        workspaceProcessed(projectPath, treePath);
+                        done();
+                    }
+                }).catch(data => {
+                    docsDoneCount++;
+                    if (docsToDo.length == docsDoneCount) {
+                        workspaceProcessed(projectPath, treePath);
+                        done();
+                    }
+                    Debug.error(util.inspect(data, false, null));
+                    Debug.error(`Issue processing ${file}`);
+                    connection.sendNotification("fileProcessed", { filename: file, total: docsDoneCount, error: util.inspect(data, false, null) });
                 });
-                if (docsToDo.length == docsDoneCount) {
-                    workspaceProcessed(projectPath, treePath);
-                }
-            }).catch(data => {
-                docsDoneCount++;
-                if (docsToDo.length == docsDoneCount) {
-                    workspaceProcessed(projectPath, treePath);
-                }
-                Debug.error(util.inspect(data, false, null));
-                Debug.error(`Issue processing ${file}`);
-                connection.sendNotification("fileProcessed", { filename: file, total: docsDoneCount, error: util.inspect(data, false, null) });
             });
         });
     });

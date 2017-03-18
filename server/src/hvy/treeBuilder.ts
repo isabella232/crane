@@ -9,13 +9,12 @@
 import { IConnection } from 'vscode-languageserver';
 import { TreeBuilderV2 } from './treeBuilderV2';
 import { Program } from 'php-parser';
+import { Parser } from './Parser';
 
 import {
     FileNode,
     SymbolCache
 } from './nodes';
-
-var phpParser = require("php-parser");
 
 let connection: IConnection;
 
@@ -34,9 +33,11 @@ export class TreeBuilder
 
     // TODO -- Handle PHP written inside an HTML file (strip everything except php code)
 
+    public parser:Parser;
 
     public SetConnection(conn: IConnection){
         connection = conn;
+        this.parser = new Parser(conn, true);
     }
 
     // Parse PHP code to generate an object tree for intellisense suggestions
@@ -44,26 +45,13 @@ export class TreeBuilder
     {
         return new Promise((resolve, reject) =>
         {
-            var parserInst = new phpParser({
-                parser: {
-                    extractDoc: true,
-                    suppressErrors: true
-                },
-                ast: {
-                    withPositions: true
-                }
-            });
-
-            var ast: Program = parserInst.parseCode(text);
-            parserInst = null;
-
+            let ast: Program = this.parser.parse(text, filePath);
             this.BuildObjectTree(ast, filePath).then((tree) => {
                 var symbolCache = this.BuildSymbolCache(tree, filePath).then(symbolCache => {
                     var returnObj = {
                         tree: tree,
                         symbolCache: symbolCache
                     };
-
                     resolve(returnObj);
                 }).catch(data => {
                     reject(data);
