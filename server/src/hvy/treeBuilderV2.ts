@@ -24,7 +24,7 @@ import {
     NamespacePart,
     DocComment
 } from './nodes';
-import { Namespaces } from "../util/namespaces";
+import { Namespaces } from "../util/Namespaces";
 import { DocCommentHelper } from "./docCommentHelper";
 
 const docParser = require("doc-parser");

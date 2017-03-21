@@ -7,7 +7,7 @@
 "use strict";
 
 import { DocComment, PositionInfo, DocCommentParam } from "./nodes";
-import { Namespaces } from "../util/namespaces";
+import { Namespaces } from "../util/Namespaces";
 
 const docParser = require("doc-parser");
 var docReader = new docParser();
