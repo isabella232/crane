@@ -11,7 +11,8 @@ import { TreeBuilder } from "./hvy/treeBuilder";
 import {
     FileNode,FileSymbolCache, SymbolType,
     AccessModifierNode, ClassNode, TraitNode,
-    MethodNode, NamespaceNode, NamespacePart
+    MethodNode, NamespaceNode, NamespacePart,
+    DocCommentSuggestionInfo, BaseNode, DocComment
 } from "./hvy/nodes";
 import { Files } from "./util/Files";
 import { Namespaces } from "./util/namespaces";
@@ -246,22 +247,14 @@ export class SuggestionBuilder
 
         // Remove duplicated (overwritten) items
         var filtered = [];
+        var cache = {};
 
         for (var i = 0, l = toReturn.length; i < l; i++) {
             var item = toReturn[i];
 
-            var found = false;
-
-            for (var j = 0, sl = filtered.length; j < sl; j++) {
-                var subItem = filtered[j];
-
-                if (subItem.label == item.label) {
-                    found = true;
-                }
-            }
-
-            if (!found) {
+            if (!(item.label in cache)) {
                 filtered.push(item);
+                cache[item.label] = true;
             }
         }
 
@@ -349,7 +342,13 @@ export class SuggestionBuilder
                     var classNode = fileNode.classes[j];
 
                     if (classNode.namespace == namespaceToSearch) {
-                        suggestions.push({ label: classNode.name, kind: CompletionItemKind.Class, detail: "(class)" });
+                        let docInfo = this.getDocCommentInfo(classNode);
+                        suggestions.push({
+                            label: classNode.name,
+                            kind: CompletionItemKind.Class,
+                            detail: "(class)",
+                            documentation: docInfo.description
+                        });
                     }
                 }
 
@@ -357,7 +356,13 @@ export class SuggestionBuilder
                     var traitNode = fileNode.traits[j];
 
                     if (traitNode.namespace == namespaceToSearch) {
-                        suggestions.push({ label: traitNode.name, kind: CompletionItemKind.Class, detail: "(trait)" });
+                        let docInfo = this.getDocCommentInfo(traitNode);
+                        suggestions.push({
+                            label: traitNode.name,
+                            kind: CompletionItemKind.Class,
+                            detail: "(trait)",
+                            documentation: docInfo.description
+                        });
                     }
                 }
 
@@ -365,13 +370,68 @@ export class SuggestionBuilder
                     var interfaceNode = fileNode.interfaces[j];
 
                     if (interfaceNode.namespace == namespaceToSearch) {
-                        suggestions.push({ label: interfaceNode.name, kind: CompletionItemKind.Interface, detail: "(interface)" });
+                        let docInfo = this.getDocCommentInfo(interfaceNode);
+                        suggestions.push({
+                            label: interfaceNode.name,
+                            kind: CompletionItemKind.Interface,
+                            detail: "(interface)",
+                            documentation: docInfo.description
+                        });
                     }
                 }
             }
         }
 
         return suggestions;
+    }
+
+    private getDocCommentInfo(item, defaultType: string = null): DocCommentSuggestionInfo
+    {
+        let type = item.type;
+        let description = "";
+
+        if (defaultType != null) {
+            type = defaultType;
+        }
+
+        if (type == null) {
+            type = "unknown";
+        }
+
+        let docComment:DocComment = item.docComment;
+        if (docComment) {
+            if (docComment.deprecated) {
+                description += "DEPRECATED";
+                if (docComment.deprecatedMessage) {
+                    description += " " + docComment.deprecatedMessage;
+                }
+                description += "\n\n";
+            }
+
+            if (docComment.returns) {
+                type = docComment.returns.type;
+            }
+
+            if (docComment.summary) {
+                description += docComment.summary;
+            }
+
+            if (docComment.throws && docComment.throws.length > 0) {
+                description += "\n";
+                docComment.throws.forEach(throwItem => {
+                    description += `\nThrows ${throwItem.type} (${throwItem.summary})`;
+                });
+            }
+        }
+
+        if (description == "") {
+            description = null;
+        }
+
+        return {
+            type: type,
+            description: description
+        }
     }
 
     private buildSuggestionsForScope(scope: Scope, options: ScopeOptions) : CompletionItem[]
@@ -386,11 +446,13 @@ export class SuggestionBuilder
             for (var i = 0, l = this.currentFileNode.constants.length; i < l; i++) {
                 let item = this.currentFileNode.constants[i];
 
-                let value = item.value;
-                if (item.type == "string") {
-                    value = "\"" + value + "\"";
-                }
-                toReturn.push({ label: item.name, kind: CompletionItemKind.Value, detail: `(constant) : ${item.type} : ${value}` });
+                let docInfo = this.getDocCommentInfo(item);
+                toReturn.push({
+                    label: item.name,
+                    kind: CompletionItemKind.Value,
+                    detail: `(constant) : ${docInfo.type}`,
+                    documentation: docInfo.description
+                });
             }
         }
 
@@ -398,7 +460,13 @@ export class SuggestionBuilder
             for (var i = 0, l = this.currentFileNode.topLevelVariables.length; i < l; i++) {
                 let item = this.currentFileNode.topLevelVariables[i];
 
-                toReturn.push({ label: item.name, kind: CompletionItemKind.Variable, detail: `(variable) : ${item.type}` });
+                let docInfo = this.getDocCommentInfo(item);
+                toReturn.push({
+                    label: item.name,
+                    kind: CompletionItemKind.Variable,
+                    detail: `(variable) : ${docInfo.type}`,
+                    documentation: docInfo.description
+                });
             }
         }
 
@@ -407,7 +475,13 @@ export class SuggestionBuilder
                 let item = this.currentFileNode.namespaceUsings[i];
 
                 if (item.alias != null) {
-                    toReturn.push({ label: item.alias, kind: CompletionItemKind.Class, detail: "(class) " + item.name });
+                    let docInfo = this.getDocCommentInfo(item, item.name);
+                    toReturn.push({
+                        label: item.alias,
+                        kind: CompletionItemKind.Class,
+                        detail: "(class) : " + docInfo.type,
+                        documentation: docInfo.description
+                    });
                 }
             }
         }
@@ -446,7 +520,13 @@ export class SuggestionBuilder
                     for (var i = 0, l:number = funcs[0].scopeVariables.length; i < l; i++) {
                         let item = funcs[0].scopeVariables[i];
 
-                        toReturn.push({ label: item.name, kind: CompletionItemKind.Variable, detail: `(variable) : ${item.type}` });
+                        let docInfo = this.getDocCommentInfo(item);
+                        toReturn.push({
+                            label: item.name,
+                            kind: CompletionItemKind.Variable,
+                            detail: `(variable) : ${docInfo.type}`,
+                            documentation: docInfo.description
+                        });
                     }
                 }
 
@@ -454,7 +534,13 @@ export class SuggestionBuilder
                     for (var i = 0, l:number = funcs[0].params.length; i < l; i++) {
                         let item = funcs[0].params[i];
 
-                        toReturn.push({ label: item.name, kind: CompletionItemKind.Property, detail: `(parameter) : ${item.type}` });
+                        let docInfo = this.getDocCommentInfo(item);
+                        toReturn.push({
+                            label: item.name,
+                            kind: CompletionItemKind.Property,
+                            detail: `(parameter) : ${docInfo.type}`,
+                            documentation: docInfo.description
+                        });
                     }
                 }
 
@@ -463,7 +549,13 @@ export class SuggestionBuilder
                         let item = funcs[0].globalVariables[i];
 
                         // TODO -- look up original variable to find the type
-                        toReturn.push({ label: item, kind: CompletionItemKind.Variable, detail: `(imported global) : mixed` });
+                        let docInfo = this.getDocCommentInfo(item, "mixed");
+                        toReturn.push({
+                            label: item,
+                            kind: CompletionItemKind.Variable,
+                            detail: `(imported global) : ${docInfo.type}`,
+                            documentation: docInfo.description
+                        });
                     }
                 }
             }
@@ -484,11 +576,13 @@ export class SuggestionBuilder
                     }
 
                     if (include) {
+                        let docInfo = this.getDocCommentInfo(item);
                         toReturn.push({
                             label: item.name,
                             kind: CompletionItemKind.Class,
                             detail: "(class)" + this.getNamespace(item),
-                            insertText: this.getInsertTextWithNamespace(item, options)
+                            insertText: this.getInsertTextWithNamespace(item, options),
+                            documentation: docInfo.description
                         });
                     }
                 }
@@ -506,11 +600,13 @@ export class SuggestionBuilder
                     }
 
                     if (include) {
+                        let docInfo = this.getDocCommentInfo(item);
                         toReturn.push({
                             label: item.name,
                             kind: CompletionItemKind.Interface,
                             detail: "(interface)" + this.getNamespace(item),
-                            insertText: this.getInsertTextWithNamespace(item, options)
+                            insertText: this.getInsertTextWithNamespace(item, options),
+                            documentation: docInfo.description
                         });
                     }
                 }
@@ -528,11 +624,13 @@ export class SuggestionBuilder
                     }
 
                     if (include) {
+                        let docInfo = this.getDocCommentInfo(item);
                         toReturn.push({
                             label: item.name,
                             kind: CompletionItemKind.Class,
                             detail: "(trait)" + this.getNamespace(item),
-                            insertText: this.getInsertTextWithNamespace(item, options)
+                            insertText: this.getInsertTextWithNamespace(item, options),
+                            documentation: docInfo.description
                         });
                     }
                 }
@@ -542,7 +640,15 @@ export class SuggestionBuilder
                 for (var j = 0, sl:number = fileNode.functions.length; j < sl; j++) {
                     let item = fileNode.functions[j];
 
-                    toReturn.push({ label: item.name, kind: CompletionItemKind.Function,  detail: `(function) : ${item.returns}`, insertText: this.getFunctionInsertText(item) });
+                    let docInfo = this.getDocCommentInfo(item);
+                    let detail = this.getFunctionParamInfo(docInfo, item);
+                    toReturn.push({
+                        label: item.name,
+                        kind: CompletionItemKind.Function,
+                        detail: detail,
+                        insertText: this.getFunctionInsertText(item),
+                        documentation: docInfo.description
+                    });
                 }
             }
 
@@ -550,12 +656,46 @@ export class SuggestionBuilder
                 for (var j = 0, sl:number = fileNode.namespaces.length; j < sl; j++) {
                     let item = fileNode.namespaces[j];
 
-                    toReturn.push({ label: item.name, kind: CompletionItemKind.Module,  detail: `(namespace)` });
+                    let docInfo = this.getDocCommentInfo(item);
+                    toReturn.push({
+                        label: item.name,
+                        kind: CompletionItemKind.Module,
+                        detail: `(namespace)`,
+                        documentation: docInfo.description
+                    });
                 }
             }
         }
 
         return toReturn;
+    }
+
+    private getFunctionParamInfo(docInfo: DocCommentSuggestionInfo, item: MethodNode) {
+        let detail = ": " + docInfo.type;
+
+        let params: string[] = [];
+
+        item.params.forEach(item => {
+            let type = item.docType;
+
+            if (type != null && type != "") {
+                type += " ";
+            }
+
+            let itemInfo = type + item.name;
+
+            if (item.optional) {
+                itemInfo = "[" + itemInfo + "]";
+            }
+
+            params.push(itemInfo);
+        });
+
+        if (params.length > 0) {
+            let joinedParams = params.join(", ");
+            detail = "(" + joinedParams + ") : " + docInfo.type;
+        }
+        return detail;
     }
 
     private getInsertTextWithNamespace(node, options: ScopeOptions): string
@@ -915,17 +1055,19 @@ export class SuggestionBuilder
 
     private addClassMembers(classNode: ClassNode, staticOnly: boolean, includePrivate: boolean, includeProtected: boolean)
     {
-        var toReturn = [];
+        var toReturn: CompletionItem[] = [];
 
         if (staticOnly == true) {
             for (var i = 0, l:number = classNode.constants.length; i < l; i++) {
                 let subNode = classNode.constants[i];
 
-                let value = subNode.value;
-                if (subNode.type == "string") {
-                    value = "\"" + value + "\"";
-                }
-                toReturn.push({ label: subNode.name, kind: CompletionItemKind.Value, detail: `(constant) : ${subNode.type} : ${value}` });
+                let docInfo = this.getDocCommentInfo(subNode);
+                toReturn.push({
+                    label: subNode.name,
+                    kind: CompletionItemKind.Value,
+                    detail: `(constant) : ${docInfo.type}`,
+                    documentation: docInfo.description
+                });
             }
         }
 
@@ -933,19 +1075,26 @@ export class SuggestionBuilder
             let subNode = classNode.methods[i];
 
             if (subNode.isStatic == staticOnly) {
-                var accessModifier = "(" + this.buildAccessModifierText(subNode.accessModifier);
                 var insertText = this.getFunctionInsertText(subNode);
+                let docInfo = this.getDocCommentInfo(subNode);
+                let detail = this.getFunctionParamInfo(docInfo, subNode);
 
-                accessModifier = accessModifier + ` method) : ${subNode.returns}`;
+                var returnObject = {
+                    label: subNode.name,
+                    kind: CompletionItemKind.Function,
+                    detail: detail,
+                    insertText: insertText,
+                    documentation: docInfo.description
+                }
 
                 if (includeProtected && subNode.accessModifier == AccessModifierNode.protected) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Function, detail: accessModifier, insertText: insertText });
+                    toReturn.push(returnObject);
                 }
                 if (includePrivate && subNode.accessModifier == AccessModifierNode.private) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Function, detail: accessModifier, insertText: insertText });
+                    toReturn.push(returnObject);
                 }
                 if (subNode.accessModifier == AccessModifierNode.public) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Function, detail: accessModifier, insertText: insertText });
+                    toReturn.push(returnObject);
                 }
             }
         }
@@ -954,8 +1103,10 @@ export class SuggestionBuilder
             let subNode = classNode.properties[i];
 
             if (subNode.isStatic == staticOnly) {
-                var accessModifier = "(" + this.buildAccessModifierText(subNode.accessModifier) + ` property) : ${subNode.type}`;
                 var insertText = subNode.name;
+                let docInfo = this.getDocCommentInfo(subNode);
+
+                var accessModifier = "(" + this.buildAccessModifierText(subNode.accessModifier) + ` property) : ${docInfo.type}`;
 
                 if (subNode.isStatic) {
                     // Add a the leading $
@@ -963,13 +1114,31 @@ export class SuggestionBuilder
                 }
 
                 if (includeProtected && subNode.accessModifier == AccessModifierNode.protected) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Property, detail: accessModifier, insertText: insertText });
+                    toReturn.push({
+                        label: subNode.name,
+                        kind: CompletionItemKind.Property,
+                        detail: accessModifier,
+                        insertText: insertText,
+                        documentation: docInfo.description
+                    });
                 }
                 if (includePrivate && subNode.accessModifier == AccessModifierNode.private) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Property, detail: accessModifier, insertText: insertText });
+                    toReturn.push({
+                        label: subNode.name,
+                        kind: CompletionItemKind.Property,
+                        detail: accessModifier,
+                        insertText: insertText,
+                        documentation: docInfo.description
+                    });
                 }
                 if (subNode.accessModifier == AccessModifierNode.public) {
-                    toReturn.push({ label: subNode.name, kind: CompletionItemKind.Property, detail: accessModifier, insertText: insertText });
+                    toReturn.push({
+                        label: subNode.name,
+                        kind: CompletionItemKind.Property,
+                        detail: accessModifier,
+                        insertText: insertText,
+                        documentation: docInfo.description
+                    });
                 }
             }
         }
@@ -996,20 +1165,14 @@ export class SuggestionBuilder
 
         // Remove duplicated (overwritten) items
         var filtered = [];
-        for (var i = 0, l:number = toReturn.length; i < l; i++) {
-            let item = toReturn[i];
+        var cache = {};
 
-            var found = false;
-            for (var j = 0, sl:number = filtered.length; j < sl; j++) {
-                let subItem = filtered[j];
+        for (var i = 0, l = toReturn.length; i < l; i++) {
+            var item = toReturn[i];
 
-                if (subItem.label == item.label) {
-                    found = true;
-                }
-            }
-
-            if (!found) {
+            if (!(item.label in cache)) {
                 filtered.push(item);
+                cache[item.label] = true;
             }
         }
 

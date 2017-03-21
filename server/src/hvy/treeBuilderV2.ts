@@ -21,13 +21,19 @@ import {
     VariableNode,
     NamespaceUsingNode,
     NamespaceNode,
-    NamespacePart
+    NamespacePart,
+    DocComment
 } from './nodes';
 import { Namespaces } from "../util/namespaces";
+import { DocCommentHelper } from "./docCommentHelper";
+
+const docParser = require("doc-parser");
+var docReader = new docParser();
 
 export class TreeBuilderV2
 {
     private tree: FileNode;
+    private lastDocComment: DocComment = null;
 
     public processBranch(branch, tree: FileNode, parent) : FileNode
     {
@@ -39,6 +45,10 @@ export class TreeBuilderV2
             });
         } else {
             switch (branch.kind) {
+                case "doc":
+                    this.saveDocComment(branch);
+                    break;
+
                 case "namespace":
                     this.buildNamespaceDeclaration(branch, tree);
                     this.processBranch(branch.children, tree, branch);
@@ -145,6 +155,14 @@ export class TreeBuilderV2
         }
     }
 
+    private saveDocComment(branch)
+    {
+        if (branch.isDoc) {
+            let docCommentHelper = new DocCommentHelper();
+            this.lastDocComment = docCommentHelper.buildDocCommentFromBranch(branch, this.tree);
+        }
+    }
+
     private buildNamespaceDeclaration(branch, context: FileNode)
     {
         let namespace = new NamespaceNode(branch.name);
@@ -204,7 +222,21 @@ export class TreeBuilderV2
                 }
             }
 
+            this.buildDocCommentForNode(node);
+
+            if (node.docComment && node.docComment.returns && node.docComment.returns.type) {
+                node.type = node.docComment.returns.type;
+            }
+
             context.push(node);
+        }
+    }
+
+    private buildDocCommentForNode(node)
+    {
+        if (this.lastDocComment && (node.startPos.line == (this.lastDocComment.endPos.line + 1))) {
+            node.docComment = this.lastDocComment;
+            this.lastDocComment = null;
         }
     }
 
@@ -229,6 +261,11 @@ export class TreeBuilderV2
             });
         }
 
+        interfaceNode.startPos = this.buildPosition(branch.loc.start);
+        interfaceNode.endPos = this.buildPosition(branch.loc.end);
+
+        this.buildDocCommentForNode(interfaceNode);
+
         if (branch.body) {
             branch.body.forEach(interfaceBodyBranch => {
                 switch (interfaceBodyBranch.kind) {
@@ -241,10 +278,6 @@ export class TreeBuilderV2
                 }
             });
         }
-
-        interfaceNode.startPos = this.buildPosition(branch.loc.start);
-        interfaceNode.endPos = this.buildPosition(branch.loc.end);
-
         context.push(interfaceNode);
     }
 
@@ -266,15 +299,16 @@ export class TreeBuilderV2
             });
         }
 
+        traitNode.startPos = this.buildPosition(branch.loc.start);
+        traitNode.endPos = this.buildPosition(branch.loc.end);
+
+        this.buildDocCommentForNode(traitNode);
+
         if (branch.body) {
             branch.body.forEach(classBodyBranch => {
                 this.buildClassBody(classBodyBranch, traitNode);
             });
         }
-
-        traitNode.startPos = this.buildPosition(branch.loc.start);
-        traitNode.endPos = this.buildPosition(branch.loc.end);
-
         context.push(traitNode);
     }
 
@@ -299,31 +333,32 @@ export class TreeBuilderV2
         classNode.isAbstract = branch.isAbstract;
         classNode.isFinal = branch.isFinal;
 
+        classNode.startPos = this.buildPosition(branch.loc.start);
+        classNode.endPos = this.buildPosition(branch.loc.end);
+
+        this.buildDocCommentForNode(classNode);
+
         if (branch.body) {
             branch.body.forEach(classBodyBranch => {
                 this.buildClassBody(classBodyBranch, classNode);
             });
         }
-
-        classNode.startPos = this.buildPosition(branch.loc.start);
-        classNode.endPos = this.buildPosition(branch.loc.end);
-
         context.push(classNode);
     }
 
     private buildClassBody(branch, classNode: ClassNode)
     {
         switch (branch.kind) {
+            case "doc":
+                this.saveDocComment(branch);
+                break;
+
             case "property":
                 this.buildProperty(branch, classNode);
                 break;
 
             case "classconstant":
                 this.buildConstant(branch, classNode.constants);
-                break;
-
-            case "doc":
-                this.buildDocComment(branch, classNode);
                 break;
 
             case "method":
@@ -360,6 +395,7 @@ export class TreeBuilderV2
 
         propNode.accessModifier = this.getVisibility(branch.visibility);
 
+        this.buildDocCommentForNode(propNode);
         classNode.properties.push(propNode);
     }
 
@@ -377,12 +413,8 @@ export class TreeBuilderV2
             constNode.value = branch.value.value;
         }
 
+        this.buildDocCommentForNode(constNode);
         context.push(constNode);
-    }
-
-    private buildDocComment(branch, classNode: ClassNode)
-    {
-        // TODO
     }
 
     private buildMethodOrConstructor(branch, classNode: ClassNode)
@@ -428,8 +460,9 @@ export class TreeBuilderV2
 
         node.startPos = this.buildPosition(branch.loc.start);
         node.endPos = this.buildPosition(branch.loc.end);
+        this.buildDocCommentForNode(node);
 
-        node.params = this.buildFunctionArguments(branch.arguments);
+        node.params = this.buildFunctionArguments(branch.arguments, node);
 
         if (branch.body && branch.body.children) {
             branch.body.children.forEach(child => {
@@ -462,7 +495,7 @@ export class TreeBuilderV2
         }
     }
 
-    private buildFunctionArguments(methodArguments)
+    private buildFunctionArguments(methodArguments, node: MethodNode)
     {
         let args = new Array<ParameterNode>();
 
@@ -483,6 +516,17 @@ export class TreeBuilderV2
 
             if (item.type) {
                 arg.type = item.type.name;
+            }
+
+            if (node.docComment && node.docComment.params.length > 0) {
+                node.docComment.params.some(param => {
+                    if (param.name == arg.name) {
+                        arg.type = param.type;
+                        arg.docType = param.type;
+                        arg.docDescription = param.summary;
+                        return true;
+                    }
+                });
             }
 
             args.push(arg);
