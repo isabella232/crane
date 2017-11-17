@@ -12,8 +12,8 @@
     "url": "https://github.com/HvyIndustries/crane.git"
   },
   "dependencies": {
-    "php-parser": "^2.0.0-pre6",
-    "php-reflection": "^2.2.1",
+    "php-parser": "^2.1.0",
+    "php-reflection": "^2.3.0",
     "vscode-languageserver": "^3.0.4"
   },
   "devDependencies": {
