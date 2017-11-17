@@ -31,7 +31,7 @@ export default function(app:App) {
                 const items = item.find(context);
                 if (Array.isArray(items) && items.length > 0) {
                     result = result.concat(items);
-                    if (result.length > app.settings.maxSuggestionSize) {
+                    if (app.settings.maxSuggestionSize > 0 && result.length > app.settings.maxSuggestionSize) {
                         result = result.slice(0, app.settings.maxSuggestionSize);
                         if (app.settings.debugMode) {
                             app.message.warning(
