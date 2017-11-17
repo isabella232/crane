@@ -122,7 +122,7 @@ connection.onDidChangeWatchedFiles((change) => {
         // workspace is ready to start
         change.changes.forEach(element => {
             // resolves the filename
-            let filename:String = instance.resolveUri(element.uri);
+            let filename:string = instance.resolveUri(element.uri);
             // add a new file to the parser cache
             if (element.type === FileChangeType.Created) {
                 instance.workspace.parse(filename)
