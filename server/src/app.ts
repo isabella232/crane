@@ -8,7 +8,10 @@ import events = require('events');
 import ISettings from './options/ISettings';
 import Settings from './options/Settings';
 import Message from './util/Message';
-import { Repository } from 'php-reflection';
+import Cache from './util/Cache';
+import { Repository, Options } from 'php-reflection';
+import { shard, index } from 'grafine';
+
 
 /**
  * The main application instance
@@ -38,6 +41,11 @@ class App extends events.EventEmitter {
      * Current working directory
      */
     path: string;
+
+    /**
+     * The caching flushing timer
+     */
+    private cacheFlush:NodeJS.Timer;
 
     /**
      * Initialize the workspace
@@ -80,16 +88,64 @@ class App extends events.EventEmitter {
      * Update settings
      */
     setSettings(settings: ISettings) {
+        // init settings
         this.settings = settings;
+        if (this.cacheFlush) {
+          clearInterval(this.cacheFlush);
+        }
 
-        this.workspace = new Repository(this.path, {
+        // bind parameters
+        let opt:Options = {
             // @todo : bind parameters
-            cacheByFileHash: true,
-            lazyCache: function(type: String, name: String) {
+            debug: this.settings.debugMode,
+            include: this.settings.include,
+            exclude: this.settings.exclude,
+            ext: this.settings.extensions,
+            encoding: this.settings.encoding,
+            cacheByFileHash: false,
+            cacheByFileDate: false,
+            cacheByFileSize: false,
+            // force disable worker for now
+            forkWorker: false,
+            scanVars: this.settings.scanVars,
+            scanExpr: this.settings.scanExpr,
+            scanDocs: true,
+        };
 
-            }
-        });
+        // enabling the cache system
+        if (this.settings.enableCache) {
+            opt.cacheByFileHash = this.settings.cacheByFileHash;
+            opt.cacheByFileDate = this.settings.cacheByFileDate;
+            opt.cacheByFileSize = this.settings.cacheByFileSize;
+            opt.lazyCache = function(type: string, name: string) {
+                return Cache.instance(type, name).read();
+            };
+        }
 
+        // initialize the reflection repository
+        this.workspace = new Repository(this.path, opt);
+
+        // start the async cache synchronisation if caching is enabled
+        if (this.settings.enableCache) {
+          this.cacheFlush = setInterval(() => {
+            // flushing each shard
+            this.workspace.db.shards().forEach((shard: shard) => {
+              if (shard.isChanged()) {
+                Cache.instance(Cache.TYPE_SHARD, shard.id().toString()).write(
+                  shard.export()
+                );
+              }
+            });
+            // flushing each index
+            this.workspace.db.indexes().forEach((index: index) => {
+              if (index.isChanged()) {
+                Cache.instance(Cache.TYPE_INDEX, index.id().toString()).write(
+                  index.export()
+                );
+              }
+            });
+          }, 10000);
+        }
 
         // forward events :
         this.workspace.on('read', this.emit.bind(this, ['read']));
